@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -48,6 +49,33 @@ type updateNodeRequest struct {
 	Hidden             *bool   `json:"hidden"`
 	Collapsed          *bool   `json:"collapsed"`
 	DailyTargetMinutes *int    `json:"dailyTargetMinutes"`
+	ParentIDSet        bool    `json:"-"`
+}
+
+func (r *updateNodeRequest) UnmarshalJSON(data []byte) error {
+	type alias updateNodeRequest
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var base alias
+	if err := json.Unmarshal(data, &base); err != nil {
+		return err
+	}
+	*r = updateNodeRequest(base)
+	if parentRaw, ok := raw["parentId"]; ok {
+		r.ParentIDSet = true
+		if string(parentRaw) == "null" {
+			r.ParentID = nil
+			return nil
+		}
+		var pid int64
+		if err := json.Unmarshal(parentRaw, &pid); err != nil {
+			return err
+		}
+		r.ParentID = &pid
+	}
+	return nil
 }
 
 type createRecordRequest struct {
@@ -490,9 +518,9 @@ func (s *server) updateNode(c *gin.Context) {
 		args = append(args, *req.Name)
 		argN++
 	}
-	if req.ParentID != nil {
+	if req.ParentIDSet {
 		sets = append(sets, fmt.Sprintf("parent_id=$%d", argN))
-		args = append(args, *req.ParentID)
+		args = append(args, req.ParentID)
 		argN++
 	}
 	if req.OrderNo != nil {

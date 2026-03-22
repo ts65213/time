@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import NodePickerModal from './components/NodePickerModal.vue'
 
 const activeTab = ref('tree')
 const me = ref(null)
@@ -48,6 +49,14 @@ const manualRecordDraft = ref({
   description: '',
   applySplitByDate: true,
 })
+const showItemPickerModal = ref(false)
+const itemPickerInitialSelectedId = ref(null)
+const showStatsScopePickerModal = ref(false)
+const statsScopePickerInitialId = ref(null)
+const showMoveSourcePickerModal = ref(false)
+const moveSourcePickerInitialId = ref(null)
+const showMoveTargetPickerModal = ref(false)
+const moveTargetPickerInitialId = ref(null)
 const savingRecord = ref(false)
 const selectedItemIdForTimer = ref(null)
 const moveDraft = ref({ sourceId: null, targetId: null })
@@ -58,6 +67,12 @@ const heatmapWrapRef = ref(null)
 const statsTreeCollapsedMap = ref({})
 const statsLongPressTimer = ref(null)
 const statsLongPressFired = ref(false)
+const recordMenuId = ref(null)
+const recordMenuPosition = ref({ x: 24, y: 140 })
+const recordLongPressTimer = ref(null)
+const recordLongPressFired = ref(false)
+const recordPressStartPoint = ref(null)
+const recordPressStartScrollTop = ref(0)
 const timelineVisibleCount = ref(20)
 const statsTrendGranularity = ref('day')
 const statsTrendWrapRef = ref(null)
@@ -65,6 +80,12 @@ const statsTrendWindowStart = ref(0)
 const statsTrendWindowEnd = ref(-1)
 const statsTrendEdge = ref('none')
 const statsTrendScrollLeft = ref(0)
+const statsModuleCollapsed = ref({
+  ratio: false,
+  timeline: false,
+  trend: false,
+  heatmap: false,
+})
 const timerFreezeMs = ref(null)
 const timerMinDisplayMs = ref(0)
 const timerLocalResumeAt = ref(null)
@@ -73,6 +94,71 @@ const timerLocalResumeBaseMs = ref(0)
 function localDateKey(date) {
   const pad = (num) => String(num).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function weekdayText(date) {
+  const d = date instanceof Date ? date : new Date(date)
+  const day = d.getDay()
+  const map = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  return map[day] || ''
+}
+
+function timeText(value) {
+  const d = value instanceof Date ? value : new Date(value)
+  const pad = (x) => String(x).padStart(2, '0')
+  if (!Number.isFinite(d.getTime())) return '--:--'
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function recordEffectiveMs(record) {
+  const start = new Date(record?.startAt).getTime()
+  const end = new Date(record?.endAt).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0
+  const totalMs = end - start
+  const pauseMs = Math.min(Math.max(0, Number(record?.pauseDurationMs || 0)), totalMs)
+  return Math.max(0, totalMs - pauseMs)
+}
+
+function recordDateWeekText(record) {
+  const d = new Date(record?.startAt)
+  if (!Number.isFinite(d.getTime())) return ''
+  return `${localDateKey(d)} ${weekdayText(d)}`
+}
+
+function recordTimeRangeText(record) {
+  return `${timeText(record?.startAt)} → ${timeText(record?.endAt)}`
+}
+
+function itemCategoryPathText(itemId) {
+  const out = []
+  let cursor = nodeMap.value.get(itemId)
+  while (cursor) {
+    if (cursor.type === 'category') out.push(cursor.name)
+    const parentId = cursor.parentId
+    if (parentId === null || parentId === undefined) break
+    cursor = nodeMap.value.get(parentId)
+  }
+  out.reverse()
+  return out.join(' / ')
+}
+
+function openItemPicker() {
+  itemPickerInitialSelectedId.value = manualRecordDraft.value.itemId ? Number(manualRecordDraft.value.itemId) : null
+  showItemPickerModal.value = true
+}
+
+function onConfirmItemPicker(id) {
+  manualRecordDraft.value.itemId = id
+}
+
+function openStatsScopePicker() {
+  statsScopePickerInitialId.value = statsScopeNodeId.value ? Number(statsScopeNodeId.value) : null
+  showStatsScopePickerModal.value = true
+}
+
+function onConfirmStatsScopePicker(id) {
+  jumpStatsScope(id)
+  activeTab.value = 'stats'
 }
 
 function setStatsRangeByPreset(preset) {
@@ -96,6 +182,30 @@ function setStatsRangeByPreset(preset) {
   statsRangeStartDate.value = localDateKey(start)
   statsRangeEndDate.value = localDateKey(today)
 }
+
+function isTextSelectionAllowed(target) {
+  const el = target instanceof Element ? target : null
+  if (!el) return false
+  if (el.closest('input, textarea, select, [contenteditable="true"]')) return true
+  return false
+}
+
+function preventLongPressMenuAndSelection() {
+  const onContextMenu = (e) => {
+    if (isTextSelectionAllowed(e.target)) return
+    e.preventDefault()
+  }
+  const onSelectStart = (e) => {
+    if (isTextSelectionAllowed(e.target)) return
+    e.preventDefault()
+  }
+  window.addEventListener('contextmenu', onContextMenu, { capture: true })
+  window.addEventListener('selectstart', onSelectStart, { capture: true })
+}
+
+onMounted(() => {
+  preventLongPressMenuAndSelection()
+})
 
 setStatsRangeByPreset('today')
 
@@ -343,6 +453,10 @@ const statsScopePathNodes = computed(() => {
   path.reverse()
   return [{ id: null, name: '全部' }, ...path]
 })
+const statsScopeCurrentName = computed(() => {
+  if (!statsScopeNodeId.value) return '全部'
+  return nodeMap.value.get(statsScopeNodeId.value)?.name || '全部'
+})
 const statsAverageDailyMs = computed(() => {
   const days = Math.max(0, Number(statsRangeTotalDays.value || 0))
   if (days <= 0) return 0
@@ -431,10 +545,12 @@ const statsTrendDefaultWindow = computed(() => {
   const all = statsTrendBuckets.value
   if (all.length === 0) return { start: 0, end: -1 }
   const last = all.length - 1
+  const minVisible = 10
   const { startInclusive, endExclusive } = statsRangeBoundary.value
   if (!startInclusive || !endExclusive) {
     const size = defaultStatsTrendWindowSize(statsTrendGranularity.value)
-    return { start: Math.max(0, last - size + 1), end: last }
+    const finalSize = Math.max(minVisible, size)
+    return { start: Math.max(0, last - finalSize + 1), end: last }
   }
   const rangeStart = trendBucketStart(startInclusive, statsTrendGranularity.value)
   const rangeEnd = trendBucketStart(addDays(endExclusive, -1), statsTrendGranularity.value)
@@ -449,6 +565,17 @@ const statsTrendDefaultWindow = computed(() => {
     }
   }
   if (end < start) end = start
+  let count = end - start + 1
+  if (count < minVisible) {
+    const need = minVisible - count
+    const expandLeft = Math.min(start, need)
+    start -= expandLeft
+    count += expandLeft
+    if (count < minVisible) {
+      const remain = minVisible - count
+      end = Math.min(last, end + remain)
+    }
+  }
   return { start, end }
 })
 const statsTrendVisibleBuckets = computed(() => {
@@ -819,10 +946,12 @@ function resetStatsTrendWindow() {
 }
 
 function statsTrendBarHeight(durationMs) {
+  const value = Number(durationMs || 0)
+  if (value <= 0) return 0
   const max = statsTrendMaxDurationMs.value
-  if (max <= 0) return 8
-  const ratio = Number(durationMs || 0) / max
-  return Math.max(8, Math.round(ratio * 120))
+  if (max <= 0) return 0
+  const ratio = value / max
+  return Math.max(8, Math.round(ratio * 150))
 }
 
 function onStatsTrendScroll(event) {
@@ -999,13 +1128,32 @@ const moveTargetNode = computed(() => {
   return nodeMap.value.get(moveDraft.value.targetId) || null
 })
 const isMovingNode = computed(() => !!moveSourceNode.value)
+const moveSourceLabel = computed(() => moveSourceNode.value?.name || '请选择节点')
+const moveTargetLabel = computed(() => moveTargetNode.value?.name || '请选择节点')
+const canMoveBeforeAvailable = computed(() => {
+  if (!moveSourceNode.value || !moveTargetNode.value) return false
+  return canMoveBeforeAfter(moveSourceNode.value.id, moveTargetNode.value.id)
+})
+const canMoveAfterAvailable = computed(() => {
+  if (!moveSourceNode.value || !moveTargetNode.value) return false
+  return canMoveBeforeAfter(moveSourceNode.value.id, moveTargetNode.value.id)
+})
 const nodeMenuNode = computed(() => {
   if (!nodeMenuId.value) return null
   return nodeMap.value.get(nodeMenuId.value) || null
 })
+const recordMenuRecord = computed(() => {
+  if (!recordMenuId.value) return null
+  return records.value.find((r) => r.id === recordMenuId.value) || null
+})
 const canMoveDownAvailable = computed(() => {
   if (!moveSourceNode.value || !moveTargetNode.value) return false
   return canMoveInto(moveSourceNode.value.id, moveTargetNode.value.id)
+})
+const showMoveInsideButton = computed(() => {
+  if (!moveTargetNode.value || moveTargetNode.value.type !== 'category') return false
+  const children = childrenMap.value.get(moveTargetNode.value.id) || []
+  return children.length === 0
 })
 const moveActionShortText = computed(() => (moveTargetNode.value?.type === 'category' ? '前/后/下' : '前/后'))
 const moveActionQuotedText = computed(() => (moveTargetNode.value?.type === 'category' ? '“前”“后”或“下”' : '“前”“后”'))
@@ -1016,6 +1164,15 @@ const nodeMenuStyle = computed(() => {
   const minGap = 12
   const left = Math.min(Math.max(minGap, nodeMenuPosition.value.x), vw - menuWidth - minGap)
   const top = Math.min(Math.max(minGap, nodeMenuPosition.value.y), vh - 260)
+  return { left: `${left}px`, top: `${top}px` }
+})
+const recordMenuStyle = computed(() => {
+  const vw = window.innerWidth || 360
+  const vh = window.innerHeight || 640
+  const menuWidth = 176
+  const minGap = 12
+  const left = Math.min(Math.max(minGap, recordMenuPosition.value.x), vw - menuWidth - minGap)
+  const top = Math.min(Math.max(minGap, recordMenuPosition.value.y), vh - 160)
   return { left: `${left}px`, top: `${top}px` }
 })
 
@@ -1541,6 +1698,10 @@ function getPressPoint(event) {
   return { x: 24, y: 140 }
 }
 
+function currentPageScrollTop() {
+  return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0
+}
+
 function startNodePress(node, event) {
   if (isMovingNode.value) return
   const point = getPressPoint(event)
@@ -1562,6 +1723,50 @@ function clearNodePress() {
 function openNodeMenu(node, point) {
   nodeMenuPosition.value = { x: (point?.x || 24) + 6, y: (point?.y || 140) + 6 }
   nodeMenuId.value = node.id
+}
+
+function startRecordPress(record, event) {
+  const point = getPressPoint(event)
+  clearRecordPress()
+  recordLongPressFired.value = false
+  recordPressStartPoint.value = point
+  recordPressStartScrollTop.value = currentPageScrollTop()
+  recordLongPressTimer.value = setTimeout(() => {
+    const scrolled = Math.abs(currentPageScrollTop() - recordPressStartScrollTop.value) > 2
+    if (scrolled) return
+    recordLongPressFired.value = true
+    openRecordMenu(record, point)
+  }, 500)
+}
+
+function onRecordPressMove(event) {
+  if (!recordLongPressTimer.value || !recordPressStartPoint.value) return
+  const point = getPressPoint(event)
+  const dx = Math.abs(point.x - recordPressStartPoint.value.x)
+  const dy = Math.abs(point.y - recordPressStartPoint.value.y)
+  const moved = dx > 10 || dy > 10
+  const scrolled = Math.abs(currentPageScrollTop() - recordPressStartScrollTop.value) > 2
+  if (moved || scrolled) {
+    clearRecordPress()
+  }
+}
+
+function clearRecordPress() {
+  if (recordLongPressTimer.value) {
+    clearTimeout(recordLongPressTimer.value)
+    recordLongPressTimer.value = null
+  }
+  recordPressStartPoint.value = null
+  recordPressStartScrollTop.value = 0
+}
+
+function openRecordMenu(record, point) {
+  recordMenuPosition.value = { x: (point?.x || 24) + 6, y: (point?.y || 140) + 6 }
+  recordMenuId.value = record.id
+}
+
+function closeRecordMenu() {
+  recordMenuId.value = null
 }
 
 function openNodeEditModal(node) {
@@ -1596,6 +1801,17 @@ function jumpStatsScope(nodeId) {
     return
   }
   statsScopeNodeId.value = nodeId
+}
+
+function toggleStatsModule(key) {
+  statsModuleCollapsed.value = {
+    ...statsModuleCollapsed.value,
+    [key]: !statsModuleCollapsed.value[key],
+  }
+}
+
+function isStatsModuleCollapsed(key) {
+  return !!statsModuleCollapsed.value[key]
 }
 
 function isStatsNodeCollapsed(nodeId) {
@@ -1677,7 +1893,7 @@ function startMoveFromAction(sourceId = nodeActionDraft.value.id) {
   clearNodePress()
   longPressFired.value = false
   moveDraft.value = { sourceId, targetId: null }
-  moveTip.value = '请选择目标节点，然后点击“前”“后”完成移动'
+  moveTip.value = ''
   nodeMenuId.value = null
   showNodeActionModal.value = false
   activeTab.value = 'tree'
@@ -1686,6 +1902,24 @@ function startMoveFromAction(sourceId = nodeActionDraft.value.id) {
 function cancelMoveMode() {
   moveDraft.value = { sourceId: null, targetId: null }
   moveTip.value = ''
+}
+
+function openMoveSourcePicker() {
+  moveSourcePickerInitialId.value = moveDraft.value.sourceId ? Number(moveDraft.value.sourceId) : null
+  showMoveSourcePickerModal.value = true
+}
+
+function onConfirmMoveSourcePicker(id) {
+  moveDraft.value = { ...moveDraft.value, sourceId: id }
+}
+
+function openMoveTargetPicker() {
+  moveTargetPickerInitialId.value = moveDraft.value.targetId ? Number(moveDraft.value.targetId) : null
+  showMoveTargetPickerModal.value = true
+}
+
+function onConfirmMoveTargetPicker(id) {
+  moveDraft.value = { ...moveDraft.value, targetId: id }
 }
 
 async function moveNodeRelative(sourceId, targetId, position) {
@@ -1704,16 +1938,41 @@ async function moveNodeRelative(sourceId, targetId, position) {
   const prev = siblings[insertIdx - 1] || null
   const next = siblings[insertIdx] || null
 
-  let orderNo = Date.now()
-  if (prev && next) {
-    orderNo = (Number(prev.orderNo) + Number(next.orderNo)) / 2
-  } else if (!prev && next) {
-    orderNo = Number(next.orderNo) - 1
-  } else if (prev && !next) {
-    orderNo = Number(prev.orderNo) + 1
+  let prevOrder = prev ? Number(prev.orderNo) : null
+  let nextOrder = next ? Number(next.orderNo) : null
+
+  if (
+    prevOrder !== null &&
+    nextOrder !== null &&
+    Number.isFinite(prevOrder) &&
+    Number.isFinite(nextOrder) &&
+    nextOrder-prevOrder <= 1
+  ) {
+    const updates = []
+    for (let i = 0; i < siblings.length; i++) {
+      const sib = siblings[i]
+      const normalized = (i + 1) * 1000
+      if (Number(sib.orderNo) !== normalized) {
+        updates.push(api(`/api/nodes/${sib.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ orderNo: normalized }),
+        }))
+      }
+    }
+    if (updates.length) {
+      await Promise.all(updates)
+    }
+    prevOrder = insertIdx > 0 ? insertIdx * 1000 : null
+    nextOrder = insertIdx < siblings.length ? (insertIdx + 1) * 1000 : null
   }
-  if (!Number.isFinite(orderNo)) {
-    orderNo = Date.now()
+
+  let orderNo = 1000
+  if (prevOrder !== null && nextOrder !== null) {
+    orderNo = Math.floor((prevOrder + nextOrder) / 2)
+  } else if (prevOrder === null && nextOrder !== null) {
+    orderNo = nextOrder - 1000
+  } else if (prevOrder !== null && nextOrder === null) {
+    orderNo = prevOrder + 1000
   }
 
   const patch = { orderNo }
@@ -1730,14 +1989,13 @@ async function confirmMoveNode(position) {
     ? canMoveInto(moveSourceNode.value.id, moveTargetNode.value.id)
     : canMoveBeforeAfter(moveSourceNode.value.id, moveTargetNode.value.id)
   if (!canMove) {
-    moveTip.value = '该位置不可移动，请选择其它目标节点'
     return
   }
   try {
     await moveNodeRelative(moveSourceNode.value.id, moveTargetNode.value.id, position)
     cancelMoveMode()
   } catch (e) {
-    moveTip.value = e.message || '移动失败'
+    window.alert(e.message || '移动失败')
   }
 }
 
@@ -1793,7 +2051,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app" :class="{ 'has-timer-panel': timerState.activeItemId || selectedItemIdForTimer, 'has-move-panel': isMovingNode }">
+  <div class="app" :class="{ 'has-timer-panel': timerState.activeItemId || selectedItemIdForTimer }">
     <template v-if="!isLoggedIn">
       <div class="card login-card">
         <h1>登录</h1>
@@ -1864,53 +2122,66 @@ onMounted(async () => {
 
       <section v-if="activeTab === 'stats'" class="stats-page-full">
         <div class="stats-module-card stats-overview-card">
-          <div class="stats-scope-path-row">
-            <template v-for="(p, idx) in statsScopePathNodes" :key="`scope-path-${p.id ?? 'root'}-${idx}`">
-              <button
-                class="stats-scope-path-btn"
-                :class="{ 'is-current': idx === statsScopePathNodes.length - 1 }"
-                @click="jumpStatsScope(p.id)"
-              >
-                {{ p.name }}
-              </button>
-              <span v-if="idx < statsScopePathNodes.length - 1" class="stats-scope-path-sep">-</span>
-            </template>
+          <div class="stats-filters">
+            <div class="stats-filter-item">
+              <span class="stats-filter-label">事项范围</span>
+              <div class="stats-scope-selector">
+                <button class="stats-scope-btn" @click="openStatsScopePicker">
+                  <span class="stats-scope-name">{{ statsScopeCurrentName }}</span>
+                  <span class="stats-scope-arrow">▼</span>
+                </button>
+                <button v-if="statsScopeNodeId" type="button" class="stats-scope-clear-btn" @click.stop="clearStatsScope">×</button>
+              </div>
+            </div>
+            <div class="stats-filter-item">
+              <span class="stats-filter-label">时间范围</span>
+              <el-date-picker
+                v-model="statsRangePickerValue"
+                type="daterange"
+                value-format="YYYY-MM-DD"
+                format="YYYY-MM-DD"
+                range-separator="~"
+                start-placeholder="开始日期"
+                end-placeholder="结束日期"
+                class="stats-date-picker"
+                popper-class="stats-range-popper"
+                :editable="false"
+                :clearable="true"
+                :unlink-panels="true"
+                :shortcuts="statsRangePickerShortcuts"
+                @clear="onStatsRangePickerClear"
+              />
+            </div>
           </div>
-          <div class="row">
-            <el-date-picker
-              v-model="statsRangePickerValue"
-              type="daterange"
-              value-format="YYYY-MM-DD"
-              format="YYYY-MM-DD"
-              range-separator="~"
-              start-placeholder="开始日期"
-              end-placeholder="结束日期"
-              class="date-range-picker"
-              popper-class="stats-range-popper"
-              :editable="false"
-              :clearable="true"
-              :unlink-panels="true"
-              :shortcuts="statsRangePickerShortcuts"
-              @clear="onStatsRangePickerClear"
-            >
-              <template #prefix>
-                <span></span>
-              </template>
-            </el-date-picker>
-          </div>
-          <div class="stats-summary-inline">
-            <span>已选择<strong>{{ statsRangeTotalDays }}</strong>天</span>
-            <span>总时长：<strong>{{ durationTextHourMin(statsView.totalDurationMs || 0) }}</strong></span>
-            <span>每日平均时长：<strong>{{ durationTextHourMin(statsAverageDailyMs) }}</strong></span>
-          </div>
-          <div class="stats-summary-inline">
-            <span>其中活跃<strong>{{ statsActiveDays }}</strong>天</span>
-            <span>活跃日平均时长：<strong>{{ durationTextHourMin(statsActiveAverageMs) }}</strong></span>
+          <div class="stats-summary-grid">
+            <div class="stats-summary-card">
+              <span class="stats-card-label">已选择</span>
+              <strong class="stats-card-value">{{ statsRangeTotalDays }}<small>天</small></strong>
+            </div>
+            <div class="stats-summary-card">
+              <span class="stats-card-label">活跃</span>
+              <strong class="stats-card-value">{{ statsActiveDays }}<small>天</small></strong>
+            </div>
+            <div class="stats-summary-card">
+              <span class="stats-card-label">总时长</span>
+              <strong class="stats-card-value">{{ durationTextHourMin(statsView.totalDurationMs || 0) }}</strong>
+            </div>
+            <div class="stats-summary-card">
+              <span class="stats-card-label">每日平均</span>
+              <strong class="stats-card-value">{{ durationTextHourMin(statsAverageDailyMs) }}</strong>
+            </div>
+            <div class="stats-summary-card">
+              <span class="stats-card-label">活跃日均</span>
+              <strong class="stats-card-value">{{ durationTextHourMin(statsActiveAverageMs) }}</strong>
+            </div>
           </div>
         </div>
         <div class="stats-module-card">
-          <h3 class="stats-section-title">时长占比</h3>
-          <div class="stats-tree-list">
+          <div class="stats-module-header">
+            <h3 class="stats-section-title">时长占比</h3>
+            <button class="stats-module-toggle" @click="toggleStatsModule('ratio')">{{ isStatsModuleCollapsed('ratio') ? '展开' : '折叠' }}</button>
+          </div>
+          <div v-if="!isStatsModuleCollapsed('ratio')" class="stats-tree-list">
             <div
               v-for="n in statsTreeRows"
               :key="`stats-tree-${n.id}`"
@@ -1937,7 +2208,7 @@ onMounted(async () => {
                   borderBottomRightRadius: (statsNodeOffsetMap.get(n.id) || 0) + statsNodePercent(n) > 99.9 ? 'var(--radius)' : '0'
                 }"
               />
-              <div class="stats-node-line">
+              <div class="stats-node-line" :style="{ '--stats-indent': `${n.depth * 18}px` }">
                 <strong>{{ n.name }}</strong>
                 <div class="stats-node-stats">
                   <span>{{ statsDurationText(statsNodeDurationMs(n)) }}</span>
@@ -1949,18 +2220,36 @@ onMounted(async () => {
           </div>
         </div>
         <div class="stats-module-card">
-          <h3 class="stats-section-title">时间轴</h3>
-          <div class="timeline-box">
+          <div class="stats-module-header">
+            <h3 class="stats-section-title">时间轴</h3>
+            <button class="stats-module-toggle" @click="toggleStatsModule('timeline')">{{ isStatsModuleCollapsed('timeline') ? '展开' : '折叠' }}</button>
+          </div>
+          <div v-if="!isStatsModuleCollapsed('timeline')" class="timeline-box">
             <div class="record-list">
-              <div class="record-item" v-for="r in timelineRecords" :key="r.id">
-                <div>
-                  <strong>{{ nodeMap.get(r.itemId)?.name || `事项#${r.itemId}` }}</strong>
-                  <p>{{ toInputDateTime(r.startAt).replace('T', ' ') }} → {{ toInputDateTime(r.endAt).replace('T', ' ') }}</p>
-                  <p>暂停 {{ durationTextHourMin(r.pauseDurationMs) }} | {{ r.source }} | {{ r.description || '无描述' }}</p>
+              <div
+                class="record-item timeline-record-item"
+                v-for="r in timelineRecords"
+                :key="r.id"
+                :title="r.description || ''"
+                @mousedown="startRecordPress(r, $event)"
+                @mouseup="clearRecordPress"
+                @mouseleave="clearRecordPress"
+                @touchstart="startRecordPress(r, $event)"
+                @touchmove="onRecordPressMove($event)"
+                @touchend="clearRecordPress"
+                @touchcancel="clearRecordPress"
+                @contextmenu.prevent
+              >
+                <div class="timeline-record-line timeline-record-line-1">
+                  <span v-if="itemCategoryPathText(r.itemId)" class="timeline-record-path">{{ itemCategoryPathText(r.itemId) }} / </span>
+                  <strong class="timeline-record-item-name">{{ nodeMap.get(r.itemId)?.name || `事项#${r.itemId}` }}</strong>
                 </div>
-                <div class="record-actions">
-                  <button class="warning" @click="openEditRecordModal(r)">编辑</button>
-                  <button class="danger" @click="removeRecord(r.id)">删除</button>
+                <div class="timeline-record-line timeline-record-line-2">
+                  <span>{{ recordDateWeekText(r) }}</span>
+                </div>
+                <div class="timeline-record-line timeline-record-line-3">
+                  <span>{{ recordTimeRangeText(r) }}</span>
+                  <span class="timeline-record-effective">有效 {{ durationTextHourMin(recordEffectiveMs(r)) }}</span>
                 </div>
               </div>
             </div>
@@ -1976,8 +2265,9 @@ onMounted(async () => {
               <option value="week">按周</option>
               <option value="month">按月</option>
             </select>
+            <button class="stats-module-toggle" @click="toggleStatsModule('trend')">{{ isStatsModuleCollapsed('trend') ? '展开' : '折叠' }}</button>
           </div>
-          <div class="stats-trend-panel">
+          <div v-if="!isStatsModuleCollapsed('trend')" class="stats-trend-panel">
             <div class="stats-trend-year-tag">{{ statsTrendLeftVisibleYear }}年</div>
             <div class="stats-trend-body">
               <div class="stats-trend-y-axis">
@@ -2003,11 +2293,14 @@ onMounted(async () => {
               </div>
             </div>
           </div>
-          <button class="ghost stats-trend-more-btn" :class="{ 'is-hidden': !statsTrendHasMore }" @click="loadMoreStatsTrend">{{ statsTrendLoadMoreText }}</button>
+          <button v-if="!isStatsModuleCollapsed('trend')" class="ghost stats-trend-more-btn" :class="{ 'is-hidden': !statsTrendHasMore }" @click="loadMoreStatsTrend">{{ statsTrendLoadMoreText }}</button>
         </div>
         <div class="stats-module-card">
-          <h3 class="stats-section-title">热力图</h3>
-          <div ref="heatmapWrapRef" class="heatmap-wrap">
+          <div class="stats-module-header">
+            <h3 class="stats-section-title">热力图</h3>
+            <button class="stats-module-toggle" @click="toggleStatsModule('heatmap')">{{ isStatsModuleCollapsed('heatmap') ? '展开' : '折叠' }}</button>
+          </div>
+          <div v-if="!isStatsModuleCollapsed('heatmap')" ref="heatmapWrapRef" class="heatmap-wrap">
             <div class="heatmap-months">
               <div
                 v-for="month in heatmapMonthColumns"
@@ -2056,19 +2349,29 @@ onMounted(async () => {
         </div>
       </section>
 
-      <section v-if="isMovingNode" class="move-node-panel">
-        <p class="move-node-text">
-          把“{{ moveSourceNode?.name || '节点' }}”移动到“{{ moveTargetNode?.name || '请选择节点' }}”{{ moveActionShortText }}
-        </p>
-        <p v-if="moveTip" class="move-node-tip">{{ moveTip }}</p>
-        <p v-else-if="!moveTargetNode" class="move-node-tip">请先点击一个目标节点</p>
-        <div class="move-node-actions">
-          <button class="ghost" @click="cancelMoveMode">取消</button>
-          <button class="primary" :disabled="!moveTargetNode" @click="confirmMoveNode('before')">前</button>
-          <button class="primary" :disabled="!moveTargetNode" @click="confirmMoveNode('after')">后</button>
-          <button v-if="moveTargetNode?.type === 'category'" class="primary" :disabled="!canMoveDownAvailable" @click="confirmMoveNode('inside')">下</button>
+      <div v-if="isMovingNode" class="modal-mask move-node-mask" @click.self="cancelMoveMode">
+        <div class="modal-card move-node-modal" @click.stop>
+          <div class="move-node-row">
+            <span class="move-node-prefix">把</span>
+            <button class="move-node-select-btn" @click="openMoveSourcePicker">
+              <span>{{ moveSourceLabel }}</span>
+              <span>▼</span>
+            </button>
+          </div>
+          <div class="move-node-row">
+            <span class="move-node-prefix">移到</span>
+            <button class="move-node-select-btn" @click="openMoveTargetPicker">
+              <span>{{ moveTargetLabel }}</span>
+              <span>▼</span>
+            </button>
+          </div>
+          <div class="move-node-actions-row">
+            <button class="primary" :disabled="!canMoveBeforeAvailable" @click="confirmMoveNode('before')">前面</button>
+            <button class="primary" :disabled="!canMoveAfterAvailable" @click="confirmMoveNode('after')">后面</button>
+            <button v-if="showMoveInsideButton" class="primary" :disabled="!canMoveDownAvailable" @click="confirmMoveNode('inside')">里面</button>
+          </div>
         </div>
-      </section>
+      </div>
 
       <div v-if="nodeMenuNode" class="node-menu-backdrop" @click="nodeMenuId = null"></div>
       <div v-if="nodeMenuNode" class="node-dropdown-menu" :style="nodeMenuStyle" @click.stop>
@@ -2079,6 +2382,50 @@ onMounted(async () => {
         <button class="node-dropdown-item" @click="toggleNodeHidden(nodeMenuNode)">{{ nodeMenuNode.hidden ? '取消隐藏' : '隐藏' }}</button>
         <button class="node-dropdown-item danger" @click="deleteNodeFromMenu(nodeMenuNode)">删除</button>
       </div>
+      <div v-if="recordMenuRecord" class="node-menu-backdrop" @click="closeRecordMenu"></div>
+      <div v-if="recordMenuRecord" class="node-dropdown-menu" :style="recordMenuStyle" @click.stop>
+        <button class="node-dropdown-item" @click="openEditRecordModal(recordMenuRecord); closeRecordMenu()">编辑</button>
+        <button class="node-dropdown-item danger" @click="removeRecord(recordMenuRecord.id); closeRecordMenu()">删除</button>
+      </div>
+      <NodePickerModal
+        v-model="showItemPickerModal"
+        title="选择事项"
+        :nodeMap="nodeMap"
+        :childrenMap="childrenMap"
+        :showHiddenNodes="settings.showHiddenNodes"
+        :initialSelectedId="itemPickerInitialSelectedId"
+        @confirm="onConfirmItemPicker"
+      />
+      <NodePickerModal
+        v-model="showStatsScopePickerModal"
+        title="选择统计范围"
+        :nodeMap="nodeMap"
+        :childrenMap="childrenMap"
+        :showHiddenNodes="settings.statsIncludeHiddenNodes"
+        :initialSelectedId="statsScopePickerInitialId"
+        :allowedTypes="['category', 'item']"
+        @confirm="onConfirmStatsScopePicker"
+      />
+      <NodePickerModal
+        v-model="showMoveSourcePickerModal"
+        title="选择要移动的节点"
+        :nodeMap="nodeMap"
+        :childrenMap="childrenMap"
+        :showHiddenNodes="settings.showHiddenNodes"
+        :initialSelectedId="moveSourcePickerInitialId"
+        :allowedTypes="['category', 'item']"
+        @confirm="onConfirmMoveSourcePicker"
+      />
+      <NodePickerModal
+        v-model="showMoveTargetPickerModal"
+        title="选择目标节点"
+        :nodeMap="nodeMap"
+        :childrenMap="childrenMap"
+        :showHiddenNodes="settings.showHiddenNodes"
+        :initialSelectedId="moveTargetPickerInitialId"
+        :allowedTypes="['category', 'item']"
+        @confirm="onConfirmMoveTargetPicker"
+      />
 
       <div v-if="showAddNodeModal" class="modal-mask" @click.self="showAddNodeModal = false">
         <div class="modal-card">
@@ -2139,10 +2486,9 @@ onMounted(async () => {
           <h3 class="manual-record-title">{{ manualRecordDraft.id ? '编辑记录' : '手动添加一条记录' }}</h3>
           <div class="row modal-inline-row">
             <span>事项</span>
-            <select class="manual-item-select" v-model="manualRecordDraft.itemId">
-              <option :value="null" disabled>请选择事项</option>
-              <option v-for="n in itemNodes" :key="n.id" :value="n.id">{{ n.name }}</option>
-            </select>
+            <button class="manual-item-select" type="button" @click="openItemPicker">
+              {{ nodeMap.get(manualRecordDraft.itemId)?.name || '请选择事项' }}
+            </button>
           </div>
           <div class="row modal-inline-row">
             <span>开始</span>

@@ -1,0 +1,14 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+timeapp
+
+# OS files
+.DS_Store
+
+# Artifacts
+dist.tgz
+tmp/
