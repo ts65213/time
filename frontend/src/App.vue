@@ -1,8 +1,28 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import NodePickerModal from './components/NodePickerModal.vue'
 
-const activeTab = ref('tree')
+function normalizeActiveTab(value) {
+  return value === 'tree' || value === 'stats' || value === 'settings' ? value : 'tree'
+}
+
+function tabFromHash(hash) {
+  const raw = (hash || '').replace(/^#\/?/, '')
+  if (!raw) return null
+  return raw === 'tree' || raw === 'stats' || raw === 'settings' ? raw : null
+}
+
+function loadActiveTab() {
+  return tabFromHash(window.location.hash) || 'tree'
+}
+
+function syncHashFromTab(tab) {
+  const nextHash = `#/${normalizeActiveTab(tab)}`
+  if (window.location.hash === nextHash) return
+  window.history.replaceState(null, '', nextHash)
+}
+
+const activeTab = ref(loadActiveTab())
 const me = ref(null)
 const loginForm = ref({ username: 'ts65213', password: '' })
 const loginError = ref('')
@@ -203,8 +223,21 @@ function preventLongPressMenuAndSelection() {
   window.addEventListener('selectstart', onSelectStart, { capture: true })
 }
 
+function onHashChange() {
+  const nextTab = tabFromHash(window.location.hash)
+  if (!nextTab || nextTab === activeTab.value) return
+  activeTab.value = nextTab
+}
+
 onMounted(() => {
+  onHashChange()
+  syncHashFromTab(activeTab.value)
+  window.addEventListener('hashchange', onHashChange)
   preventLongPressMenuAndSelection()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('hashchange', onHashChange)
 })
 
 setStatsRangeByPreset('today')
@@ -1024,6 +1057,7 @@ watch(
 watch(
   () => activeTab.value,
   (tab, prev) => {
+    syncHashFromTab(tab)
     if (tab === 'stats' && prev !== 'stats') {
       timelineVisibleCount.value = 20
       resetStatsTrendWindow()
