@@ -173,6 +173,16 @@ label {
   margin-bottom: 0;
 }
 
+.login-card input {
+  margin-bottom: 16px;
+}
+
+.login-card button {
+  margin-top: 16px;
+  width: 100%;
+  padding: 12px;
+}
+
 /* Buttons */
 button {
   display: inline-flex;
@@ -827,6 +837,16 @@ button:disabled {
   font-weight: 700;
   margin: 0 0 2px 0;
   color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.timer-path {
+  font-size: 13px;
+  font-weight: normal;
+  color: var(--text-muted);
 }
 
 .timer-clock {

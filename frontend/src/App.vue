@@ -2107,7 +2107,10 @@ onMounted(async () => {
 
       <section v-if="activeTab === 'tree' && (timerState.activeItemId || selectedItemIdForTimer)" class="timer-floating-panel">
         <div class="timer-info">
-          <p class="timer-name">{{ timerItem?.name || '未知事项' }}</p>
+          <p class="timer-name">
+            <span v-if="itemCategoryPathText(timerItem?.id)" class="timer-path">{{ itemCategoryPathText(timerItem?.id) }} / </span>
+            {{ timerItem?.name || '未知事项' }}
+          </p>
           <p class="timer-clock" v-if="timerState.sessionStartAt">{{ durationText(timerElapsedMs) }}</p>
           <p class="timer-clock" v-else>00:00:00</p>
         </div>
