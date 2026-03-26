@@ -58,6 +58,14 @@ input, select, textarea {
   padding-bottom: 180px; /* Extra padding for floating timer panel */
 }
 
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 50vh;
+  color: var(--text-muted);
+}
+
 /* Typography */
 h1, h2, h3 {
   margin: 0 0 12px;

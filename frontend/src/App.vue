@@ -24,6 +24,7 @@ function syncHashFromTab(tab) {
 
 const activeTab = ref(loadActiveTab())
 const me = ref(null)
+const isCheckingAuth = ref(true)
 const loginForm = ref({ username: 'ts65213', password: '' })
 const loginError = ref('')
 const addNodeError = ref('')
@@ -1297,6 +1298,8 @@ async function checkMe() {
     me.value = await api('/api/auth/me')
   } catch {
     me.value = null
+  } finally {
+    isCheckingAuth.value = false
   }
 }
 
@@ -2086,7 +2089,12 @@ onMounted(async () => {
 
 <template>
   <div class="app" :class="{ 'has-timer-panel': timerState.activeItemId || selectedItemIdForTimer }">
-    <template v-if="!isLoggedIn">
+    <template v-if="isCheckingAuth">
+      <div class="loading-container">
+        <p>正在加载...</p>
+      </div>
+    </template>
+    <template v-else-if="!isLoggedIn">
       <div class="card login-card">
         <h1>登录</h1>
         <label>用户名</label>
