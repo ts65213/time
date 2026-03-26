@@ -14,6 +14,8 @@ export default defineConfig({
         description: 'A personal time tracking application',
         theme_color: '#4f46e5',
         background_color: '#f3f4f6',
+        display: 'standalone',
+        start_url: '/',
         icons: [
           {
             src: '/pwa-192x192.png',
