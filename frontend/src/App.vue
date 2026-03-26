@@ -52,6 +52,7 @@ const statsRangeStartDate = ref('')
 const statsRangeEndDate = ref('')
 const settings = ref({ confirmBeforeSaveTimerRecord: true, showHiddenNodes: false, skipShortTimerRecord: false, statsIncludeHiddenNodes: false })
 const loadingSettings = ref(false)
+const deferredInstallPrompt = ref(null)
 const timerState = ref({
   activeItemId: null,
   sessionStartAt: null,
@@ -235,7 +236,29 @@ onMounted(() => {
   syncHashFromTab(activeTab.value)
   window.addEventListener('hashchange', onHashChange)
   preventLongPressMenuAndSelection()
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent the mini-infobar from appearing on mobile
+    e.preventDefault()
+    // Stash the event so it can be triggered later.
+    deferredInstallPrompt.value = e
+    console.log('PWA: beforeinstallprompt event fired')
+  })
+
+  window.addEventListener('appinstalled', () => {
+    // Log install to analytics
+    console.log('PWA: app installed')
+    deferredInstallPrompt.value = null
+  })
 })
+
+async function installPWA() {
+  if (!deferredInstallPrompt.value) return
+  deferredInstallPrompt.value.prompt()
+  const { outcome } = await deferredInstallPrompt.value.userChoice
+  console.log(`PWA: user choice outcome: ${outcome}`)
+  deferredInstallPrompt.value = null
+}
 
 onUnmounted(() => {
   window.removeEventListener('hashchange', onHashChange)
@@ -2390,6 +2413,7 @@ onMounted(async () => {
           <span>不保存1分钟以下的记录</span>
         </label>
         <div class="row settings-actions">
+          <button v-if="deferredInstallPrompt" class="primary" @click="installPWA">安装到主屏幕</button>
           <button @click="doLogout">退出登录</button>
         </div>
       </section>

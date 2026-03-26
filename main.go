@@ -179,13 +179,30 @@ func main() {
 
 	distPath := filepath.Join("frontend", "dist")
 	if st, err := os.Stat(distPath); err == nil && st.IsDir() {
+		// Serve specific directories
 		r.Static("/assets", filepath.Join(distPath, "assets"))
-		r.StaticFile("/", filepath.Join(distPath, "index.html"))
+
 		r.NoRoute(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			path := c.Request.URL.Path
+
+			// Skip API
+			if strings.HasPrefix(path, "/api/") {
 				c.JSON(http.StatusNotFound, gin.H{"message": "not found"})
 				return
 			}
+
+			// Try to serve static file from dist
+			filePath := filepath.Join(distPath, path)
+			if fst, err := os.Stat(filePath); err == nil && !fst.IsDir() {
+				// Explicitly set Content-Type for PWA files if needed
+				if strings.HasSuffix(path, ".webmanifest") {
+					c.Header("Content-Type", "application/manifest+json")
+				}
+				c.File(filePath)
+				return
+			}
+
+			// Fallback to index.html for SPA
 			c.File(filepath.Join(distPath, "index.html"))
 		})
 	}

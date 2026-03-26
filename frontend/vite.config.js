@@ -7,7 +7,7 @@ export default defineConfig({
     vue(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'masked-icon.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Time Tracker',
         short_name: 'Time',
@@ -18,20 +18,32 @@ export default defineConfig({
         start_url: '/',
         icons: [
           {
-            src: '/pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png'
+            src: 'favicon.svg',
+            sizes: '48x48 72x72 96x96 128x128 256x256 512x512',
+            type: 'image/svg+xml',
+            purpose: 'any'
           },
           {
-            src: '/pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png'
-          },
+            src: 'favicon.svg',
+            sizes: '48x48 72x72 96x96 128x128 256x256 512x512',
+            type: 'image/svg+xml',
+            purpose: 'maskable'
+          }
+        ],
+        screenshots: [
           {
-            src: '/pwa-512x512.png',
-            sizes: '512x512',
+            src: 'screenshots/wide.png',
+            sizes: '1024x1024',
             type: 'image/png',
-            purpose: 'any maskable'
+            form_factor: 'wide',
+            label: 'Time Tracker Desktop'
+          },
+          {
+            src: 'screenshots/mobile.png',
+            sizes: '1024x1024',
+            type: 'image/png',
+            form_factor: 'narrow',
+            label: 'Time Tracker Mobile'
           }
         ]
       },
@@ -39,6 +51,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
+      },
+      devOptions: {
+        enabled: true
       }
     })
   ],
