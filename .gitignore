@@ -11,4 +11,6 @@ timeapp
 
 # Artifacts
 dist.tgz
+dist_upload.tgz
+timeapp_linux
 tmp/
