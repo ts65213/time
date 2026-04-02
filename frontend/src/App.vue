@@ -528,8 +528,8 @@ const statsActiveAverageMs = computed(() => {
   return Math.floor(Number(statsView.value.totalDurationMs || 0) / activeDays)
 })
 
-const timelineRecords = computed(() => records.value.slice(0, timelineVisibleCount.value))
-const timelineHasMore = computed(() => records.value.length > timelineVisibleCount.value)
+const timelineRecords = computed(() => statsRangeRecords.value.slice(0, timelineVisibleCount.value))
+const timelineHasMore = computed(() => statsRangeRecords.value.length > timelineVisibleCount.value)
 const statsTrendBuckets = computed(() => {
   const granularity = statsTrendGranularity.value
   const buckets = new Map()
@@ -1290,6 +1290,11 @@ function setDatePart(field, value) {
   const current = manualRecordDraft.value[field] || ''
   const time = getTimePart(current) || '00:00'
   manualRecordDraft.value[field] = value ? `${value}T${time}` : ''
+  if (field === 'startAt' && value) {
+    const endCurrent = manualRecordDraft.value.endAt || ''
+    const endTime = getTimePart(endCurrent) || getTimePart(manualRecordDraft.value.startAt) || '00:00'
+    manualRecordDraft.value.endAt = `${value}T${endTime}`
+  }
 }
 
 function setTimePart(field, value) {
