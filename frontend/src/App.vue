@@ -528,8 +528,19 @@ const statsActiveAverageMs = computed(() => {
   return Math.floor(Number(statsView.value.totalDurationMs || 0) / activeDays)
 })
 
-const timelineRecords = computed(() => statsRangeRecords.value.slice(0, timelineVisibleCount.value))
-const timelineHasMore = computed(() => statsRangeRecords.value.length > timelineVisibleCount.value)
+const timelineSortedRecords = computed(() => {
+  return [...statsRangeRecords.value].sort((a, b) => {
+    const aStart = new Date(a.startAt).getTime()
+    const bStart = new Date(b.startAt).getTime()
+    if (bStart !== aStart) return bStart - aStart
+    const aEnd = new Date(a.endAt).getTime()
+    const bEnd = new Date(b.endAt).getTime()
+    if (bEnd !== aEnd) return bEnd - aEnd
+    return Number(b.id || 0) - Number(a.id || 0)
+  })
+})
+const timelineRecords = computed(() => timelineSortedRecords.value.slice(0, timelineVisibleCount.value))
+const timelineHasMore = computed(() => timelineSortedRecords.value.length > timelineVisibleCount.value)
 const statsTrendBuckets = computed(() => {
   const granularity = statsTrendGranularity.value
   const buckets = new Map()
